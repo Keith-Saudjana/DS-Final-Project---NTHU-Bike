@@ -40,19 +40,23 @@ class OptimizedDatabase{
     void Rent(ostream& os, int S, string Bike_Type, int IN_ID, int T){
         int Bike_Num = Get_Bike_Num(S, Bike_Type);
         if(Bike_Num > 0){
-            Root = Root->insert(Root, new User(S, Bike_Type, IN_ID, Bike_Num, T));
+            Root = Root->insert(Root, new User(S, Bike_Type, IN_ID, Bike_Num, T, 1));
             os << "accept\n";
 
-            if(Check_Inventory_Status(S, Bike_Type)) Transfer(os, S, Bike_Type, T);
+            if(Check_Inventory_Status(S, Bike_Type)){
+                Transfer(os, S, Bike_Type, T);
+            }
             return;
         }
-        else if(Check_Inventory_Status(S, "electric") + Check_Inventory_Status(S, "lady") + Check_Inventory_Status(S, "road") > 0){
+        else if(Stations[S]->electric + Stations[S]->lady +Stations[S]->road > 0){
             string New_Bike_Type = Switch(S, Bike_Type, IN_ID, T);
             int New_Bike_Num = Get_Bike_Num(S, New_Bike_Type);
-            Root = Root->insert(Root, new User(S, New_Bike_Type, IN_ID, New_Bike_Num, T));
+            Root = Root->insert(Root, new User(S, New_Bike_Type, IN_ID, New_Bike_Num, T, 1));
             os << "discount " << New_Bike_Type << "\n";
 
-            if(Check_Inventory_Status(S, New_Bike_Type)) Transfer(os, S, New_Bike_Type, T);
+            if(Check_Inventory_Status(S, New_Bike_Type)){
+                Transfer(os, S, New_Bike_Type, T);
+            }
             return;
         }
         else if(Check_Transfer(S, Bike_Type, T)){
@@ -68,6 +72,7 @@ class OptimizedDatabase{
 
     bool Check_Inventory_Status(int S, string TYP){
         //Checks if type of bike is empty and if there is a transfer on the way
+        //cout << Stations[S]->electric << " " << Stations[S]->lady << " " << Stations[S]->road << endl;
         if(TYP == "electric" && Stations[S]->electric == 0 && Stations[S]->electric_transfer.state == false) return true;
         else if(TYP == "lady" && Stations[S]->lady == 0 && Stations[S]->lady_transfer.state == false) return true;
         else if (TYP == "road" && Stations[S]->road == 0 && Stations[S]->road_transfer.state == false) return true;
@@ -75,7 +80,6 @@ class OptimizedDatabase{
     }
 
     bool Check_Transfer(int S, string TYP, int T){
-        //Calculate average map distance from the current station
         //Currently not optimized
         if(TYP == "electric" && Stations[S]->electric_transfer.state == true && Map->average_dist[S-1] >= (Stations[S]->electric_transfer.arrival_time - T)) return true;
         else if(TYP == "lady" && Stations[S]->lady_transfer.state == true && Map->average_dist[S-1] >= (Stations[S]->lady_transfer.arrival_time - T)) return true;
@@ -89,35 +93,65 @@ class OptimizedDatabase{
             if(Stations[i]->electric_transfer.arrival_time <= T){
                 Stations[i]->electric_transfer.state = false;
                 Stations[i]->electric_transfer.arrival_time = -1;
-                for(int j = 0; j < Stations[i]->electric_transfer.quantity; j++)
-                    Return_Electric(Stations[i], Stations[i]->electric_transfer.Transferred_Bike[j]);
-                delete Stations[i]->electric_transfer.Transferred_Bike;
+                while(Stations[i]->electric_transfer.Transferred_Bike.cur_size != 0){
+                    Return_Electric(Stations[i], Stations[i]->electric_transfer.Transferred_Bike[Stations[i]->electric_transfer.Transferred_Bike.cur_size]);
+                    Stations[i]->electric_transfer.Transferred_Bike.pop_back();
+                }
+                Stations[i]->electric_transfer.quantity = 0;
+
+                while(Stations[i]->electric_waiting_list.head != NULL){
+                    Waiting_User temp =  *(Stations[i]->electric_waiting_list.tail);
+                    int Bike_Num = Get_Bike_Num(i, "electric");
+                    Profit -= (T - temp.T) * Fees->waiting_fee;
+                    Root = Root->insert(Root, new User(i, "electric", temp.ID, Bike_Num, T, Fees->switching_discount));
+                    Stations[i]->electric_waiting_list.pop_front();
+                }
             }
             if(Stations[i]->lady_transfer.arrival_time <= T){
                 Stations[i]->lady_transfer.state = false;
                 Stations[i]->lady_transfer.arrival_time = -1;
-                for(int j = 0; j < Stations[i]->lady_transfer.quantity; j++)
-                    Return_Lady(Stations[i], Stations[i]->lady_transfer.Transferred_Bike[j]);
-                delete Stations[i]->lady_transfer.Transferred_Bike;
+                while(Stations[i]->lady_transfer.Transferred_Bike.cur_size != 0){
+                    Return_Electric(Stations[i], Stations[i]->lady_transfer.Transferred_Bike[Stations[i]->lady_transfer.Transferred_Bike.cur_size]);
+                    Stations[i]->lady_transfer.Transferred_Bike.pop_back();
+                }
+
+                while(Stations[i]->lady_waiting_list.head != NULL){
+                    Waiting_User temp =  *(Stations[i]->lady_waiting_list.tail);
+                    Stations[i]->lady_waiting_list.pop_front();
+                    int Bike_Num = Get_Bike_Num(i, "lady");
+                    Profit -= (T - temp.T) * Fees->waiting_fee;
+                    Root = Root->insert(Root, new User(i, "lady", temp.ID, Bike_Num, T, Fees->switching_discount));
+                    Stations[i]->lady_waiting_list.pop_front();
+                }
             }
             if(Stations[i]->road_transfer.arrival_time <= T){
                 Stations[i]->road_transfer.state = false;
                 Stations[i]->road_transfer.arrival_time = -1;
-                for(int j = 0; j < Stations[i]->road_transfer.quantity; j++)
-                    Return_Road(Stations[i], Stations[i]->road_transfer.Transferred_Bike[j]);
-                delete Stations[i]->road_transfer.Transferred_Bike;
+                while(Stations[i]->road_transfer.Transferred_Bike.cur_size != 0){
+                    Return_Electric(Stations[i], Stations[i]->road_transfer.Transferred_Bike[Stations[i]->road_transfer.Transferred_Bike.cur_size]);
+                    Stations[i]->road_transfer.Transferred_Bike.pop_back();
+                }
+
+                while(Stations[i]->road_waiting_list.head != NULL){
+                    Waiting_User temp =  *(Stations[i]->road_waiting_list.tail);
+                    Stations[i]->road_waiting_list.pop_front();
+                    int Bike_Num = Get_Bike_Num(i, "road");
+                    Profit -= (T - temp.T) * Fees->waiting_fee;
+                    Root = Root->insert(Root, new User(i, "road", temp.ID, Bike_Num, T, Fees->switching_discount));
+                    Stations[i]->road_waiting_list.pop_front();
+                }
             }
         }
     }
 
     void Balancing(ostream& os){
         for(int i = 1; i < Stations.cur_size; i ++){
-            if(Stations[i]->electric == 0) Transfer(os, i, "electric", 0);
-            if(Stations[i]->lady == 0) Transfer(os, i, "lady", 0);
-            if(Stations[i]->road == 0) Transfer(os, i, "road", 0);
+            if(Check_Inventory_Status(i, "electric")) Transfer(os, i, "electric", 0);
+            if(Check_Inventory_Status(i, "lady")) Transfer(os, i, "lady", 0);
+            if(Check_Inventory_Status(i, "road")) Transfer(os, i, "road", 0);
         }
     }
-    //ransfer 𝑠𝑗 𝑠𝑖 type quantity time
+    
     void Transfer(ostream& os, int S, string TYP, int T){
         int Chosen_Station;
         int Bike_Quantity;
@@ -125,7 +159,7 @@ class OptimizedDatabase{
         //check if there is any time left for a transfer
         if(TYP == "electric"){
             for(int i = 1; i < Stations.cur_size; i++){
-                if(S != i){
+                if(S != i && (T + Map->dist[S-1][i-1]) < 1440){
                     int station_var;
                     station_var = 100 * (Stations[i]->electric * Fees->Electric_Fee[1]) / (Map->dist[S-1][i-1] * Fees->transfer_fee);
                     if(station_var > var){
@@ -135,17 +169,18 @@ class OptimizedDatabase{
                     }
                 }
             }
+            if(var == -1) return;
             Stations[S]->electric_transfer.state = true;
             Stations[S]->electric_transfer.arrival_time = T + Map->dist[S-1][Chosen_Station-1];
             Stations[S]->electric_transfer.quantity = Bike_Quantity;
-            Stations[S]->electric_transfer.Transferred_Bike = new int[Bike_Quantity];
-            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->electric_transfer.Transferred_Bike[i] = Get_Bike_Num(Chosen_Station, "electric");
+            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->electric_transfer.Transferred_Bike.push_back(Get_Bike_Num(Chosen_Station, "electric"));
             Profit -= Fees->transfer_fee * Map->dist[S-1][Chosen_Station-1];
             os << "transfer " << Chosen_Station << " " << S << " electric " << Bike_Quantity << " " << T << "\n";
         }
         else if(TYP == "lady"){
+            return;
             for(int i = 1; i < Stations.cur_size; i++){
-                if(S != i){
+                if(S != i && (T + Map->dist[S-1][i-1]) < 1440){
                     int station_var;
                     station_var = 100 * (Stations[i]->lady * Fees->Lady_Fee[1]) / (Map->dist[S-1][i-1] * Fees->transfer_fee);
                     if(station_var > var){
@@ -155,17 +190,18 @@ class OptimizedDatabase{
                     }
                 }
             }
+            if(var == -1) return;
             Stations[S]->lady_transfer.state = true;
             Stations[S]->lady_transfer.arrival_time = T + Map->dist[S-1][Chosen_Station-1];
-            Stations[S]->lady_transfer.Transferred_Bike = new int[Bike_Quantity];
             Stations[S]->lady_transfer.quantity = Bike_Quantity;
-            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->lady_transfer.Transferred_Bike[i] = Get_Bike_Num(Chosen_Station, "lady");
+            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->lady_transfer.Transferred_Bike.push_back(Get_Bike_Num(Chosen_Station, "lady"));
             Profit -= Fees->transfer_fee * Map->dist[S-1][Chosen_Station-1];
             os << "transfer " << Chosen_Station << " " << S << " lady " << Bike_Quantity << " " << T << "\n";
         }
         else if(TYP == "road"){
+            return;
             for(int i = 1; i < Stations.cur_size; i++){
-                if(S != i){
+                if(S != i && (T + Map->dist[S-1][i-1]) < 1440){
                     int station_var;
                     station_var = 100 * (Stations[i]->road * Fees->Road_Fee[1]) / (Map->dist[S-1][i-1] * Fees->transfer_fee);
                     if(station_var > var){
@@ -175,11 +211,11 @@ class OptimizedDatabase{
                     }
                 }
             }
+            if(var == -1) return;
             Stations[S]->road_transfer.state = true;
             Stations[S]->road_transfer.arrival_time = T + Map->dist[S-1][Chosen_Station-1];
-            Stations[S]->road_transfer.Transferred_Bike = new int[Bike_Quantity];
             Stations[S]->road_transfer.quantity = Bike_Quantity;
-            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->road_transfer.Transferred_Bike[i] = Get_Bike_Num(Chosen_Station, "road");
+            for(int i = 0; i < Bike_Quantity; i++) Stations[S]->road_transfer.Transferred_Bike.push_back(Get_Bike_Num(Chosen_Station, "road"));
             Profit -= Fees->transfer_fee * Map->dist[S-1][Chosen_Station-1];
             os << "transfer " << Chosen_Station << " " << S << " road " << Bike_Quantity << " " << T << "\n";
         }
@@ -187,9 +223,18 @@ class OptimizedDatabase{
     }
 
     void Wait(int S, string TYP, int IN_ID, int T){
-        if(TYP == "electric") Stations[S]->electric_waiting_list.push_back(IN_ID, T);
-        else if(TYP == "lady")Stations[S]->lady_waiting_list.push_back(IN_ID, T);
-        else if (TYP == "road") Stations[S]->lady_waiting_list.push_back(IN_ID, T);
+        if(TYP == "electric"){
+            Stations[S]->electric_waiting_list.push_back(IN_ID, T);
+            //Stations[S]->electric_waiting_list.PrintQueue();
+        }
+        else if(TYP == "lady"){
+            Stations[S]->lady_waiting_list.push_back(IN_ID, T);
+            //Stations[S]->lady_waiting_list.PrintQueue();
+        }
+        else if (TYP == "road"){
+            Stations[S]->road_waiting_list.push_back(IN_ID, T);
+            //Stations[S]->road_waiting_list.PrintQueue();
+        }
     }
 
     string Switch(int S, string TYP, int IN_ID, int T){
@@ -281,8 +326,8 @@ class OptimizedDatabase{
         station_rent = User_Return.station_rent;
         time_spent = T - User_Return.time_rent;
 
-        if(time_spent == Map->dist[station_rent-1][S-1]) Profit += time_spent * discounted_fee;
-        else Profit += time_spent * regular_fee;
+        if(time_spent == Map->dist[station_rent-1][S-1]) Profit += time_spent * discounted_fee * User_Return.discount_value;
+        else Profit += time_spent * regular_fee * User_Return.discount_value;
     }
 
     void Return_Electric(Inventory *Station, int Bike_Num){
